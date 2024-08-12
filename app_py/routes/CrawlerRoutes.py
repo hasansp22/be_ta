@@ -9,9 +9,3 @@ def scrape():
 @app.route("/display_option")
 def display():
     return display_option()
-    # return None
-
-# @app.route("/tampil")
-# def tampils():
-#     return tampil()
-#     return None

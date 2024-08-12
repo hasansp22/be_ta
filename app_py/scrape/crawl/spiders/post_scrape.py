@@ -1,8 +1,6 @@
 import scrapy
 import math
 import re
-# from app_py import app
-# from crawl.items import LaptopItem
 
 class PostSpider(scrapy.Spider):
     name = 'post'
@@ -11,7 +9,6 @@ class PostSpider(scrapy.Spider):
         # "https://www.gadgetsnow.com/laptops/Apple"
         # "https://www.gadgetsnow.com/laptops/Acer"
     ]
-    # data = []
 
     def parse(self, response):
         for post in response.css('div.xWtEW'):

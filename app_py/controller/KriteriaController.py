@@ -2,9 +2,7 @@ from app_py import app, db, response
 from flask import Flask, jsonify, request
 from app_py.model.KriteriaModel import Kriteria, db
 import numpy as np
-from fractions import Fraction as fr
 from app_py.model.LaptopModel import Laptop
-from sqlalchemy.sql import func
 
 CR = 0
 
@@ -18,8 +16,11 @@ nilai_name = []
 
 result = []
 values = []
+worst_laptop = []
 
 name = ''
+statement = ''
+score = 0
 
 def tampil_kriteria():
     try:
@@ -93,7 +94,6 @@ def hitung_kriteria():
     try:
         def bobot(val):
             normalized_matrix = val / val.sum(axis=0)
-            # print(f'normalized matrix \n{normalized_matrix}')
             weights = normalized_matrix.mean(axis=1)
             return weights
         
@@ -102,39 +102,26 @@ def hitung_kriteria():
 
         # Extracting values from the input data and ensuring they are in the correct format
         kriteria = list(data.values())
-        # kriteria = list(data['kriteria'].values())
-        # laptops = data['laptops']
 
         n = len(kriteria)
         print(f"Number of criteria: {n}")
         print(f"kriteria awal {kriteria}\n")
 
-        n_nilai = len(nilai_price)
-        # print(n_nilai)
+        n_nilai = len(nilai_cpu)
         
         kriteria_matrix = matrix(n, kriteria)
         kriteria_weights = bobot(kriteria_matrix)
-        # total = kriteria_matrix.sum(axis=0)
-
-        # Consistency check
-        # lambda_max = np.dot(pairwise_matrix, weights).sum() / weights.sum()
+        
         lambda_max = np.dot(kriteria_matrix, kriteria_weights).sum() / kriteria_weights.sum()
         CI = (lambda_max - n) / (n - 1)
         RI = [0, 0, 0.58, 0.90, 1.12, 1.24, 1.32, 1.41, 1.45]
         CR_temp = CI / RI[n - 1]
         CR = round(CR_temp, 3)
 
-        # criteria_names = list(data['kriteria'].keys())
-        # criteria_values = {name: [] for name in criteria_names}
-
-        # for laptop in laptops:
-        #     for name in criteria_names:
-        #         criteria_values[name].append(laptop[name])
-
-        # criteria_weights = {}
-        # for name in criteria_names:
-        #     criteria_matrix = matrix(len(criteria_values[name]), criteria_values[name])
-        #     criteria_weights[name] = bobot(criteria_matrix)
+        if CR > 0.1:
+            statement = 'tidak konsisten'
+        else:
+            statement = 'konsisten'
 
         kriteria_price = matrix(n_nilai, nilai_price)
         kriteria_cpu = matrix(n_nilai, nilai_cpu)
@@ -146,28 +133,45 @@ def hitung_kriteria():
         ram = bobot(kriteria_ram)
         storage = bobot(kriteria_storage)
 
-        # Menghitung skor total untuk setiap laptop
         scores = []
-        # print(f"jml laptop (nilai cpu) {len(nilai_cpu)}\n")
-
-        # for i in range(len(laptops)):
-        #     total_score = sum(
-        #         kriteria_weights[j] * criteria_weights[name][i]
-        #         for j, name in enumerate(criteria_names)
-        #     )
-        #     scores.append(total_score)
+        round_score = []
         
-        for i in range(len(nilai_price)):
-            total_score = (
-                           kriteria_weights[0] * price[i] +
-                           kriteria_weights[1] * cpu[i] +
-                           kriteria_weights[2] * ram[i] +
-                           kriteria_weights[3] * storage[i]
-                           )
-            scores.append(total_score)
+        laptops = Laptop.query.all() 
+        no = 0
+        print(f'no sebelum {no}')
+        result.clear()
 
+        # Menghitung skor total untuk setiap laptop
+        # for i in laptops:
+        #     print(i)
+
+        for i in laptops:
+            temp_score = (
+                           kriteria_weights[0] * price[no] +
+                           kriteria_weights[1] * cpu[no] +
+                           kriteria_weights[2] * ram[no] +
+                           kriteria_weights[3] * storage[no]
+                           )
+            score = round(temp_score, 5)
+            separator = '{:,}'.format(i.price).replace(',', '.')
+            
+            appendResult(i.id, i.name, i.cpu, i.gpu, i.storage, i.ram, i.display, i.weight, separator, score)
+
+            round_score.append(
+                {
+                    'score':score,
+                }
+            )
+            if no <= n_nilai:
+                no += 1            
+                
+            scores.append(temp_score)
+        
+        print(f'\nno sesudah {no}\n')
+        length = len(scores)
+        print(f'(hitung kriteria laptop) banyak {length}')
+                
         print(f'kriteria matrix\n{kriteria_matrix}\n')
-        # print(f'total matrix {total}\n')
         print(f'kriteria weights/bobot normal\n{kriteria_weights}\n')
         
         print(f"lambda max {lambda_max}")
@@ -175,23 +179,25 @@ def hitung_kriteria():
         print(f"cr {CR}\n")
         
         print(f"jml laptop (scores) {len(scores)}\n")
-        print(scores)
-        # print(f"score {scores}\n")
 
         # Mengurutkan laptop berdasarkan skor total dan mengambil 10 laptop teratas
         top_laptops_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:10]
+        worst_laptops_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=False)[:10]
+
         top_laptops = [result[i] for i in top_laptops_indices]
+        worst_laptops = [result[i] for i in worst_laptops_indices]
+        # top_scores = [round_score[i] for i in top_laptops_indices]
 
         print(f"indices laptop {top_laptops_indices}\n")
-        # print(f"laptop paling bagus {top_laptops}")
+        print(f"\nlaptop paling bagus {top_laptops}")
 
         response = {
             "CR": CR,
+            "statement": statement,
             "top_laptop": top_laptops,
+            "worst_laptop": worst_laptops,
+            # "top_score": top_scores,
         }
-
-        # print(f"Response: {response}")
-        print("")
 
         return jsonify(response)
     except Exception as e:
@@ -205,22 +211,13 @@ def matrix(n, criteria):
 
         for i in range(n):
             for j in range(n):
-                cri = criteria[i]
                 crj = criteria[j-1]
                 if i == j:
                     pairwise_matrix[i][j] = 1.0
-                # elif i == 0 or i == 1:
-                # elif i == 0:
-                #     pairwise_matrix[i][j] = float(criteria[j])
-                #     print(f'index {[i]},{[j]} = {pairwise_matrix[i][j]}')
-                #     pairwise_matrix[j][i] = 1 / pairwise_matrix[i][j]
                 elif i < j:
                     pairwise_matrix[i][j] = float(crj/criteria[j])
-                    # print(f'index {[i]},{[j]} = {float(crj)}/{float(criteria[j])} = {pairwise_matrix[i][j]}')
-                    # pairwise_matrix[i][j] = float(pairwise_matrix[i-1][j-1]/pairwise_matrix[i-1][j])
                     pairwise_matrix[j][i] = 1 / pairwise_matrix[i][j]
 
-        # print(f'matrix\n{pairwise_matrix}\n')
         return pairwise_matrix
     except Exception as e:
         print(f'error in matrix: {e}')
@@ -272,9 +269,8 @@ def val_cpu(proc):
 
 def tampil():
     try:
-        # laptop = Laptop.query.all()
+        worst_laptop.clear()
         laptops = Laptop.query.all()
-        num_laptops = min(7, len(laptops))
 
         result.clear()
         nilai_price.clear()
@@ -282,90 +278,38 @@ def tampil():
         nilai_ram.clear()
         nilai_storage.clear()
 
-        for laptop in laptops:
-        # for i in range(num_laptops):
-        #     laptop = laptops[i]
-            cpu = laptop.cpu
+        for i in laptops:
+            cpu = i.cpu
             proc = cpu.lower()
-            separator = '{:,}'.format(laptop.price).replace(',','.')
+            separator = '{:,}'.format(i.price).replace(',', '.')
 
             temp = val_cpu(proc)
             nilai_cpu.append(temp)
-
-            result.append(
-                {
-                    'id': laptop.id,
-                    'name':laptop.name,
-                    'cpu': laptop.cpu,
-                    'gpu': laptop.gpu,
-                    'storage': laptop.storage,
-                    'ram': laptop.ram,
-                    'display': laptop.display,
-                    'weight': laptop.weight,
-                    'price': separator,
-                    # 'temp_cpu': temp,
-                }
-            )
-
-            nilai_price.append(laptop.price)
-            # print(nilai_cpu)
-            nilai_ram.append(laptop.ram)
-            nilai_storage.append(laptop.storage)
-
-            # temp = i.gpu
-            # vga = temp.lower()
-            # gpu = vga.replace(" ", "")
-            # gpu_list.append(gpu)
+            nilai_price.append(i.price)
+            nilai_ram.append(i.ram)
+            nilai_storage.append(i.storage)
             
-            # if 'rtx40' in gpu or 'm3max' in gpu:
-            #     nilai = 9
-            # elif 'rtx30' in gpu:
-            #     nilai = 8
-
-            # elif 'm3pro' in gpu :
-            #     nilai = 7
-            # elif 'radeonrx' in gpu or 'm3' in gpu or 'arc' in gpu or 'rtx20' in gpu or 'rx' in gpu:
-            #     nilai = 6
-
-            # elif 'm2' in gpu or 'irisx' in gpu or 'gtx' in gpu :
-            #     nilai = 5
-            # elif 'm1' in gpu  :
-            #     nilai = 4
-
-            # elif 'radeonvega' in gpu :
-            #     nilai = 2
-            # elif 'integrated' in gpu or 'uhd' in gpu:
-            #     nilai = 1
-            # else:
-            #     nilai = 3
-
-            # nilai_gpu.append(nilai)
-            # nilai_display.append(i.display)
-            # nilai_name.append(i.name)
+            appendResult(i.id, i.name, i.cpu, i.gpu, i.storage, i.ram, i.display, i.weight, separator, score)
         
-        # print(nilai_cpu)
-        # jml_gpu = len(nilai_price)
-        # print(f"banyak price {jml_gpu}")
-
+        length = len(nilai_cpu)
+        print(f'(tampil laptop) banyak {length}')
+                
         return jsonify(result)
     except Exception as e:
         print(e)
     
-    # return None
-
 def filter_laptop():
     try:
+        score = 0
         data = request.json
         print(f'\n{data}')
 
         filters = data['filters'] # berisi ['Apple', 'Multimedia', '16']
         print(filters)
-
         laptop = Laptop.query.all()
-        category = ''
-        # filtered_laptops = []
 
         result.clear()
+        worst_laptop.clear()
         nilai_price.clear()
         nilai_cpu.clear()
         nilai_ram.clear()
@@ -408,9 +352,9 @@ def filter_laptop():
             if (
                 (filters[0] == "Semua" or filters[0] == i.brand) and
                 (filters[1] == "Semua" or filters[1] == category) and
-                # (filters[2] == "Semua" or int(filters[2]) == i.display) and
                 
                 (filters[2] == "Semua" or 
+                 (filters[2] == '10 - 12' and 10.0 <= i.display < 13.0) or
                  (filters[2] == '13 - 15' and 13.0 <= i.display < 16.0) or
                  (filters[2] == '16 - 18' and 16.0 <= i.display < 19.0)) and
                 
@@ -424,39 +368,43 @@ def filter_laptop():
                  (filters[5] == 'Intel' and ('intel' in gpu_name or 'integrated' in gpu_name)) or
                  (filters[5] == 'Nvidia' and 'nvidia' in gpu_name))
             ):
-                nilai_price.append(i.price)
-                # nilai_name.append(i.name)
                 nilai_cpu.append(temp)
+                nilai_price.append(i.price)
                 nilai_ram.append(i.ram)
                 nilai_storage.append(i.storage)
-                
+
                 separator = '{:,}'.format(i.price).replace(',','.')
-                result.append({
-                    'id': i.id,
-                    'name': i.name,
-                    'cpu': i.cpu,
-                    'gpu': i.gpu,
-                    'storage': i.storage,
-                    'ram': i.ram,
-                    'display': i.display,
-                    'weight': i.weight,
-                    'price': separator,
-                })
+                
+                appendResult(i.id, i.name, i.cpu, i.gpu, i.storage, i.ram, i.display, i.weight, separator, score)
 
         for i in laptop:
             _filter(i)
-
-        print(len(nilai_price))
-        print(len(nilai_cpu))
-        print(len(nilai_ram))
-        print(len(nilai_storage))
+        
+        length = len(nilai_cpu)
+        print(f'(filter laptop) banyak {length}')
 
         response = {
-            # "CR": j,
             "filtered_laptops": result,
         }
-        # print(response)
         return jsonify(response)
     
     except Exception as e:
         print(e)
+
+def appendResult(id, name, cpu, gpu, storage, ram, display, weight, price, score):
+    result.append(
+                {
+                    'id': id,
+                    'name':name,
+                    'cpu': cpu,
+                    'gpu': gpu,
+                    'storage': storage,
+                    'ram': ram,
+                    'display': display,
+                    'weight': weight,
+                    'price': price,
+                    'score': score,
+                }
+            )
+    
+    return result
